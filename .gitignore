@@ -1,0 +1,33 @@
+# Runtime caches and local Python environments
+.slinky_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Generated print models, saved projects, and viewer assets
+*.stl
+*.slinky.json
+*.3mf
+*.glb
+*.gltf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
+# Local experiments, snapshots, verification artifacts, and handoff notes
+*-working/
+*-deliverables/
+petg-glow-*/
+slinky-preview-verification/
+spiral-gap-analysis/
+REVIEW_NOTES.md
+
+# Editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

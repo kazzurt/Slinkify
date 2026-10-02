@@ -1,0 +1,9 @@
+numpy
+scipy
+matplotlib
+manifold3d
+ezdxf
+gradio>=6.28,<7
+pillow
+# optional, only for importing STEP files directly (large download):
+# cadquery
