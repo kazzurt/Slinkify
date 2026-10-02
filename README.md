@@ -81,6 +81,10 @@ Seven checkboxes update the loaded 3D scene immediately and preserve the camera:
 
 Unavailable features are disabled. Use Full ramps with Transparent laps, or hide Laps, to inspect connections without creating STL files.
 
+The vertical **Layer** slider on the preview's right edge cuts the model at print-layer heights. Drag down to hide higher layers; the readout shows the selected layer and height above the bed. **Layer only** isolates one layer, and **Full** restores the complete model. Arrow keys move one layer; Home selects the first and End selects the top.
+
+Layer inspection uses the layer height from the generated preview. It preserves the camera and feature visibility, and Save still exports the complete model. These are geometry cross-sections; your slicer creates the actual print toolpaths.
+
 ## Checks and troubleshooting
 
 **Check every print layer**, under **Print options**, samples constant-pitch models and skips gap ladders. Mesh validation and support checks help inspect a design; review the sliced model and test clearance with your printer and filament.

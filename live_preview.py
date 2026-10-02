@@ -1,4 +1,4 @@
-"""A single local GLB scene with client-side feature visibility controls.
+"""A single local GLB scene with feature visibility and print-layer inspection.
 
 The printable mesh is never changed. Exposed bridge surfaces and full ramps are
 separate preview groups; the viewer enables one representation at a time.
@@ -131,13 +131,14 @@ def viewer_asset_name():
     raise RuntimeError("The installed Gradio bundle has no local 3D viewer module.")
 
 
-def preview_payload(path, method):
+def preview_payload(path, method, layer_height=0.2):
     """Return a quote-safe HTML value; only a new URL causes a mesh load."""
     if not path:
         return json.dumps(dict(url=None, method=method), separators=(",", ":"))
     local_path = Path(path).resolve().as_posix()
     return json.dumps(dict(url="/gradio_api/file=" + quote(local_path, safe="/:"),
-                           method=method), separators=(",", ":"), ensure_ascii=False)
+                           method=method, layer_height=layer_height),
+                      separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
 _TEMPLATE = """
@@ -161,7 +162,21 @@ _TEMPLATE = """
       </div>
     </div>
   </div>
-  <canvas class="slinky-preview-canvas" aria-label="Interactive 3D slinky preview"></canvas>
+  <div class="slinky-preview-stage">
+    <canvas class="slinky-preview-canvas" aria-label="Interactive 3D slinky preview"></canvas>
+    <div class="slinky-layer-panel" role="group" aria-label="Layer inspection">
+      <span class="slinky-layer-label">Layer</span>
+      <output class="slinky-layer-number" aria-live="off">—</output>
+      <span class="slinky-layer-height">—</span>
+      <input class="slinky-layer-slider" type="range" min="1" max="1" step="1" value="1"
+             aria-label="Preview layer" aria-orientation="vertical"
+             title="Drag down to remove higher layers. Arrow keys move one print layer; Home goes to the first layer and End shows the top." disabled>
+      <label class="slinky-layer-only-label" title="Isolate the selected print layer.">
+        <input class="slinky-layer-only" type="checkbox" disabled> Layer only
+      </label>
+      <button class="slinky-layer-full" type="button" title="Restore all layers." disabled>Full</button>
+    </div>
+  </div>
   <p class="slinky-preview-status" role="status">Generate a model to preview its features.</p>
   <p class="slinky-preview-hint">Drag to rotate · Scroll to zoom · Right-drag to pan</p>
 </div>
@@ -179,6 +194,17 @@ _CSS = """
 .slinky-preview-controls input:focus-visible { outline: 2px solid var(--sl-accent, #b45309); outline-offset: 3px; }
 .slinky-preview-canvas { display: block; width: 100%; height: 460px; background: #f7f7f7; touch-action: none; }
 .slinky-preview-canvas:focus-visible { outline: 2px solid var(--sl-accent, #b45309); outline-offset: -2px; }
+.slinky-preview-stage { display: grid; grid-template-columns: minmax(0, 1fr) 84px; }
+.slinky-layer-panel { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 12px 8px; min-width: 0; background: var(--sl-surface, var(--background-fill-secondary, #fafaf9)); border-left: 1px solid var(--sl-border, #ddd); }
+.slinky-layer-label { font-size: 12px; font-weight: 600; }
+.slinky-layer-number { font-size: 11px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: center; }
+.slinky-layer-height { font-size: 11px; color: var(--sl-muted, #6b7280); font-variant-numeric: tabular-nums; }
+.slinky-layer-slider { writing-mode: vertical-lr; direction: rtl; appearance: auto; align-self: stretch; flex: 1; min-height: 180px; width: 44px; margin: 6px auto; accent-color: var(--sl-accent, #b45309); cursor: ns-resize; touch-action: none; }
+.slinky-layer-only-label { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; line-height: 1.4; white-space: nowrap; cursor: pointer; }
+.slinky-layer-only { accent-color: var(--sl-accent, #b45309); width: 15px; height: 15px; }
+.slinky-layer-full { min-height: 36px; width: 100%; border: 1px solid var(--sl-border, #ddd); border-radius: 6px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
+.slinky-layer-panel :disabled { opacity: .5; cursor: default; }
+.slinky-layer-panel :is(input, button):focus-visible { outline: 2px solid var(--sl-accent, #b45309); outline-offset: 3px; }
 .slinky-preview-status, .slinky-preview-hint { margin: 0; padding: 6px 12px; font-size: 12px; line-height: 1.5; }
 .slinky-preview-hint { color: var(--sl-muted, var(--body-text-color-subdued, #6b7280)); padding-bottom: 10px; }
 .slinky-preview-status:empty { display: none; }
@@ -188,9 +214,15 @@ _JS = r"""
 const canvas = element.querySelector('canvas');
 const controls = element.querySelector('.slinky-preview-controls');
 const status = element.querySelector('.slinky-preview-status');
+const layerSlider = element.querySelector('.slinky-layer-slider');
+const layerNumber = element.querySelector('.slinky-layer-number');
+const layerHeight = element.querySelector('.slinky-layer-height');
+const sectionOnly = element.querySelector('.slinky-layer-only');
+const fullButton = element.querySelector('.slinky-layer-full');
 const boxes = Object.fromEntries([...controls.querySelectorAll('input')].map(x => [x.dataset.feature, x]));
 let details, viewer, ready, disposed = false, requestNumber = 0, currentUrl = null;
 let previewReady = false;
+let layerState = null;
 const colors = new WeakMap();
 const roleOf = mesh => mesh.name.startsWith('slinky:') ? mesh.name.split(':')[1] : null;
 const allMeshes = () => (details?.model?.assetContainer.meshes ?? []).filter(x => x.getTotalVertices() > 0);
@@ -287,6 +319,93 @@ async function ensureViewer() {
     await ready;
 }
 
+function setLayerPlanes(upperY = null, lowerY = null) {
+    if (!details) return;
+    const scene = details.scene;
+    let definesChanged = false;
+    for (const [key, height, direction] of [['clipPlane', upperY, 1], ['clipPlane2', lowerY, -1]]) {
+        if (height === null) {
+            definesChanged ||= !!scene[key];
+            scene[key] = null;
+        } else if (scene[key]) {
+            scene[key].d = -direction * height;
+        } else {
+            scene[key] = { normal: details.camera.target.clone().copyFromFloats(0, direction, 0),
+                           d: -direction * height };
+            definesChanged = true;
+        }
+    }
+    // Babylon's PBR shaders need new defines when a clipping plane is added or
+    // removed. Moving an existing plane just updates its world-space uniform.
+    if (definesChanged) scene.markAllMaterialsAsDirty(16);
+    details.markSceneMutated();
+}
+
+function resetLayers() {
+    layerState = null;
+    layerSlider.disabled = sectionOnly.disabled = fullButton.disabled = true;
+    layerSlider.min = layerSlider.max = layerSlider.value = '1';
+    layerSlider.removeAttribute('aria-valuetext');
+    sectionOnly.checked = false;
+    layerNumber.textContent = layerHeight.textContent = '—';
+    setLayerPlanes();
+}
+
+function configureLayers(payload) {
+    const bounds = details?.model?.getWorldBounds();
+    const height = bounds?.size?.[1];
+    const minY = bounds?.extents?.min?.[1] ?? bounds?.center?.[1] - height / 2;
+    if (!(height > 0) || !Number.isFinite(height) || !Number.isFinite(minY)) {
+        resetLayers();
+        return;
+    }
+    const requestedStep = Number(payload.layer_height);
+    const step = Number.isFinite(requestedStep) && requestedStep > 0 ? requestedStep : .2;
+    // GLB bounds use float32 coordinates; an exact 0.6 mm solid should have
+    // three 0.2 mm layers rather than a phantom fourth from rounding noise.
+    const layers = height / step;
+    const count = Math.max(1, Math.ceil(layers - Math.max(1, layers) * 1e-6));
+    if (!Number.isSafeInteger(count)) { resetLayers(); return; }
+    layerState = {minY, height, step, count, index: count};
+    layerSlider.min = '1';
+    // Set max before value: native range inputs clamp against their current
+    // maximum immediately, which is still 1 after resetting the previous model.
+    layerSlider.max = String(count);
+    layerSlider.value = String(count);
+    layerSlider.disabled = sectionOnly.disabled = fullButton.disabled = false;
+    sectionOnly.checked = false;
+    applyLayerPreview();
+}
+
+function applyLayerPreview() {
+    if (!layerState) return;
+    const {minY, height, step, count, index} = layerState;
+    const top = Math.min(index * step, height);
+    const lower = Math.min((index - 1) * step, top);
+    const full = index === count && !sectionOnly.checked;
+    setLayerPlanes(full ? null : minY + top, sectionOnly.checked ? minY + lower : null);
+    const digits = step < .01 ? 4 : step < .1 ? 3 : 2;
+    layerNumber.textContent = `${index} / ${count}`;
+    layerHeight.textContent = `${top.toFixed(digits)} mm`;
+    layerSlider.setAttribute('aria-valuetext', `Layer ${index} of ${count}, ${top.toFixed(digits)} millimeters${sectionOnly.checked ? ', layer only' : ''}`);
+}
+
+function moveLayer() {
+    if (!layerState) return;
+    const value = Number(layerSlider.value);
+    if (!Number.isFinite(value)) return;
+    layerState.index = Math.max(1, Math.min(layerState.count, Math.round(value)));
+    layerSlider.value = String(layerState.index);
+    applyLayerPreview();
+}
+
+function showFullModel() {
+    if (!layerState) return;
+    sectionOnly.checked = false;
+    layerSlider.value = String(layerState.count);
+    moveLayer();
+}
+
 function fitNewModel() {
     const bounds = details?.model?.getWorldBounds();
     if (!bounds || !bounds.size.every(Number.isFinite)) return;
@@ -315,12 +434,14 @@ async function loadValue() {
         const payload = typeof props.value === 'string' ? JSON.parse(props.value || '{}') : (props.value || {});
         if (!payload.url) {
             currentUrl = null;
+            resetLayers();
             if (viewer) await viewer.resetModel();
             available();
             status.textContent = 'Generate a model to preview its features.';
             return;
         }
         if (payload.url === currentUrl) { setSaveReadiness(true); return; }
+        resetLayers();
         status.textContent = 'Loading 3D preview…';
         await ensureViewer();
         if (disposed || request !== requestNumber || !viewer) return;
@@ -332,6 +453,7 @@ async function loadValue() {
         details.camera.alpha = Math.PI / 2;
         details.camera.beta = 50 * Math.PI / 180;
         fitNewModel();
+        configureLayers(payload);
         available();
         applyDisplay();
         status.textContent = '';
@@ -347,6 +469,9 @@ async function loadValue() {
 }
 
 controls.addEventListener('change', applyDisplay);
+layerSlider.addEventListener('input', moveLayer);
+sectionOnly.addEventListener('change', applyLayerPreview);
+fullButton.addEventListener('click', showFullModel);
 document.addEventListener('click', blockUnreadySave, true);
 watch('value', loadValue);
 loadValue();
@@ -356,6 +481,9 @@ const cleanup = new MutationObserver(() => {
         requestNumber++;
         cleanup.disconnect();
         controls.removeEventListener('change', applyDisplay);
+        layerSlider.removeEventListener('input', moveLayer);
+        sectionOnly.removeEventListener('change', applyLayerPreview);
+        fullButton.removeEventListener('click', showFullModel);
         document.removeEventListener('click', blockUnreadySave, true);
         viewer?.dispose();
     } else {
@@ -367,7 +495,7 @@ cleanup.observe(document.body, { childList: true, subtree: true, attributes: tru
 
 
 def preview_component():
-    """Create a persistent viewer whose seven controls run entirely in-browser."""
+    """Create a persistent viewer with browser-only visibility and layer controls."""
     javascript = _JS.replace("__VIEWER_MODULE__", viewer_asset_name()).replace(
         "__NEUTRAL_COLOR__", ",".join(str(x) for x in linear_color(LAP_COLOR)))
     return gr.HTML(value=preview_payload(None, "helix"), html_template=_TEMPLATE,

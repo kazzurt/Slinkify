@@ -265,6 +265,8 @@ process.stdout.write(JSON.stringify(cases));
     let viewer={loadModel:async url=>{loadCount++;if(url.includes('failure'))throw Error('load failure');await new Promise(resolve=>deferred=resolve);},resetModel:async()=>{}};
     const ensureViewer=async()=>{};
     const fitNewModel=()=>events.push('fit');
+    const resetLayers=()=>{};
+    const configureLayers=()=>{};
     const available=()=>{};
     const applyDisplay=()=>events.push('display');
     const requestAnimationFrame=callback=>setImmediate(()=>{events.push('frame');callback(0);});

@@ -1,5 +1,11 @@
 # Slinkify changelog
 
+## Layer inspection
+
+- Vertical preview slider clips the model at its generated print-layer heights, with layer and height readouts.
+- Layer only isolates one print layer; Full restores the complete preview. Mouse, touch and keyboard controls work locally without rebuilding geometry.
+- Camera, feature visibility and complete STL/project exports are preserved while inspecting a cross-section.
+
 ## Initial public release
 
 - Local browser app for DXF, straight-extrusion STEP, loops JSON, and saved-project profiles.

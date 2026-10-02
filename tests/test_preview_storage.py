@@ -76,7 +76,7 @@ class PreviewStorageTests(unittest.TestCase):
         keys = list(options)
         values = [options[key] for key in keys if key != "progress"]
         # The existing app interface accepts geometry positionally through edge_size.
-        draft = dict(token="reviewed-client-token")
+        draft = dict(token="reviewed-client-token", params={"layer": 0.2})
         with mock.patch.object(app, "generate", return_value=(None, "report", draft)) as generate:
             payload, report, downloads, state, button, token = app.generate_for_ui(*values)
         self.assertIsNone(json.loads(payload)["url"])

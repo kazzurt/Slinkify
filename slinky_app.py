@@ -677,7 +677,7 @@ def generate_for_ui(state, size_by, size_val, height_by, height_val, strip, band
             slice_check, out_dir, out_name, ladder, ladder_step, edge, edge_size,
             method, bridge_advance, bridge_length, bridge_depth,
             live_preview=True, preview_only=True, progress=progress)
-        payload = preview_payload(preview, method)
+        payload = preview_payload(preview, method, layer_height=draft["params"]["layer"])
         cleanup_draft(previous_draft)
         return payload, report, None, draft, gr.update(interactive=True), draft["token"]
 
